@@ -12,10 +12,14 @@ import os
 import openai
 from pymilvus import connections, Collection, FieldSchema, CollectionSchema, DataType, utility
 import uuid
+from googlesearch import search
+import requests
+from bs4 import BeautifulSoup
+import re
 
 # Milvus Managed (Zilliz Cloud) credentials
-MILVUS_URI = "" # e.g., "https://in01-xxxx.api.gcp-us-west1.zillizcloud.com"
-MILVUS_TOKEN = ""
+MILVUS_URI = "https://in03-1b399db96562037.serverless.gcp-us-west1.cloud.zilliz.com" # e.g., "https://in01-xxxx.api.gcp-us-west1.zillizcloud.com"
+MILVUS_TOKEN = "9a6e98b0f915fb79e7fd27cf4689962a4c41d6f6145c2dd2adc327f0e9eaee99e3671cace0f7b70cca8a552ac23e2eb111cf7168"
 
 COLLECTION_NAME = "DataExpertLabTestYaswanth"
 DIMENSION = 3270  # OpenAI Ada embedding dimension
@@ -25,12 +29,34 @@ OPENAI_API_KEY = os.getenv("OPENAI_API_KEY")
 
 # Initialize OpenAI client properly
 client = None
-if OPENAI_API_KEY:
+openai_status = "Not configured"
+
+def initialize_openai_client():
+    """Initialize and test OpenAI client."""
+    global client, openai_status
+    
+    if not OPENAI_API_KEY:
+        openai_status = "No API key found"
+        print("❌ OPENAI_API_KEY environment variable not set")
+        return False
+    
     try:
         client = openai.OpenAI(api_key=OPENAI_API_KEY)
+        
+        # Test the connection with a simple API call
+        test_response = client.models.list()
+        openai_status = "Connected"
+        print("✅ OpenAI client initialized and tested successfully")
+        return True
+        
     except Exception as e:
+        openai_status = f"Connection failed: {str(e)}"
         print(f"❌ Error initializing OpenAI client: {e}")
         client = None
+        return False
+
+# Initialize on startup
+initialize_openai_client()
 
 app = FastAPI(
     title="FastAPI Vibe Coding, first program by Yaswanth",
@@ -232,7 +258,11 @@ async def hello_name(name: str) -> Dict[str, str]:
 async def test_ai() -> Dict[str, str]:
     """Test endpoint to verify AI is working."""
     if not client:
-        return {"error": "OpenAI client not initialized"}
+        return {
+            "error": "OpenAI client not initialized", 
+            "status": openai_status,
+            "api_key_set": bool(OPENAI_API_KEY)
+        }
     
     try:
         response = client.chat.completions.create(
@@ -241,13 +271,92 @@ async def test_ai() -> Dict[str, str]:
                 {"role": "system", "content": "You are a helpful assistant. Give a brief, friendly response."},
                 {"role": "user", "content": "Hello! Can you tell me what time it is?"}
             ],
-            max_tokens=100,
+            max_tokens=1000,
             temperature=0.7,
         )
         answer = response.choices[0].message.content.strip()
-        return {"response": answer, "status": "AI is working!"}
+        return {
+            "response": answer, 
+            "status": "AI is working!",
+            "openai_status": openai_status,
+            "api_key_set": bool(OPENAI_API_KEY)
+        }
     except Exception as e:
-        return {"error": f"AI test failed: {str(e)}"}
+        return {
+            "error": f"AI test failed: {str(e)}",
+            "status": openai_status,
+            "api_key_set": bool(OPENAI_API_KEY)
+        }
+
+@app.get("/api/status")
+async def get_api_status() -> Dict[str, str]:
+    """Get comprehensive API status including OpenAI connection."""
+    return {
+        "api_status": "Online",
+        "openai_status": openai_status,
+        "openai_connected": client is not None,
+        "api_key_set": bool(OPENAI_API_KEY),
+        "milvus_uri": MILVUS_URI if MILVUS_URI else "Not configured",
+        "collection_name": COLLECTION_NAME
+    }
+
+@app.post("/api/reinitialize-openai")
+async def reinitialize_openai() -> Dict[str, str]:
+    """Reinitialize OpenAI client (useful if API key was updated)."""
+    success = initialize_openai_client()
+    return {
+        "success": success,
+        "status": openai_status,
+        "message": "OpenAI client reinitialized successfully" if success else "Failed to reinitialize OpenAI client"
+    }
+
+@app.post("/debug-person-search")
+async def debug_person_search(query: Dict[str, str]) -> Dict[str, str]:
+    """Debug endpoint to test person search functionality."""
+    user_message = query.get("query", "")
+    if not user_message:
+        return {"error": "No query provided"}
+    
+    # Check if this is a person-related query
+    person_keywords = ["who is", "tell me about", "information about", "profile of", "background of"]
+    is_person_query = any(keyword in user_message.lower() for keyword in person_keywords)
+    
+    # Test web search
+    web_search_info = ""
+    if is_person_query:
+        print(f"🔍 Debug: Searching web for: {user_message}")
+        web_search_info = extract_person_info(user_message)
+    
+    return {
+        "query": user_message,
+        "is_person_query": is_person_query,
+        "web_search_info": web_search_info,
+        "web_search_length": len(web_search_info) if web_search_info else 0
+    }
+
+@app.post("/web-search")
+async def web_search(query: Dict[str, str]) -> Dict[str, str]:
+    """Perform a web search and return results."""
+    search_query = query.get("query", "")
+    if not search_query:
+        return {"error": "No search query provided"}
+    
+    try:
+        print(f"🔍 Performing web search for: {search_query}")
+        search_results = search_google(search_query, num_results=5)
+        
+        if not search_results:
+            return {"response": f"No results found for '{search_query}'"}
+        
+        # Format results
+        formatted_results = "Web search results:\n\n"
+        for i, result in enumerate(search_results, 1):
+            formatted_results += f"{i}. {result['url']}\n{result['content']}\n\n"
+        
+        return {"response": formatted_results}
+    except Exception as e:
+        print(f"❌ Web search error: {e}")
+        return {"error": f"Web search failed: {str(e)}"}
 
 
 def extract_text_from_pdf(file_content: bytes) -> str:
@@ -344,23 +453,50 @@ async def ask_chatgpt(message: Dict[str, str]) -> Dict[str, str]:
     if not user_message:
         return {"error": "No message provided"}
 
+    # Check if this is a person-related query
+    person_keywords = ["who is", "tell me about", "information about", "profile of", "background of"]
+    is_person_query = any(keyword in user_message.lower() for keyword in person_keywords)
+    
     # Retrieve relevant context from Milvus
     similar_chunks = search_similar_chunks(user_message, top_k=3)
     context = "\n\n".join([chunk["chunk_text"] for chunk in similar_chunks]) if similar_chunks else ""
 
+    # If no document context and it's a person query, try Google search
+    web_search_info = ""
+    if not context and is_person_query:
+        print(f"🔍 No document context found, searching web for: {user_message}")
+        web_search_info = extract_person_info(user_message)
+        if web_search_info and not web_search_info.startswith("I couldn't find"):
+            context = f"Web search results:\n{web_search_info}"
+
     # Build prompt for ChatGPT
     if context:
-        system_prompt = (
-            "You are a helpful AI assistant. Use the following document context to answer the user's question as accurately as possible.\n\n"
-            f"Document context:\n{context}\n\n"
-            "If the answer is not in the context, provide a helpful response based on your general knowledge."
-        )
+        if web_search_info:
+            system_prompt = (
+                "You are a helpful AI assistant. Use the following web search information to answer the user's question accurately and comprehensively.\n\n"
+                f"Web Search Information:\n{context}\n\n"
+                "Provide a detailed, well-structured response based on the web search results. Include relevant facts, background information, and current details about the person."
+            )
+        else:
+            system_prompt = (
+                "You are a helpful AI assistant. Use the following document context to answer the user's question as accurately as possible.\n\n"
+                f"Document context:\n{context}\n\n"
+                "If the answer is not in the context, provide a helpful response based on your general knowledge."
+            )
     else:
-        system_prompt = (
-            "You are a helpful AI assistant. Answer the user's question to the best of your ability. "
-            "If they ask about specific documents or files, remind them to upload a document first. "
-            "For general questions, provide helpful and informative responses."
-        )
+        # For person queries without context, be more helpful
+        if is_person_query:
+            system_prompt = (
+                "You are a helpful AI assistant. The user is asking about a person, but I don't have specific information about them in my current context. "
+                "Provide a helpful response based on your general knowledge, and suggest that they can ask me to search the web for more current information. "
+                "Be informative and helpful rather than restrictive."
+            )
+        else:
+            system_prompt = (
+                "You are a helpful AI assistant. Answer the user's question to the best of your ability. "
+                "If they ask about specific documents or files, remind them to upload a document first. "
+                "For general questions, provide helpful and informative responses."
+            )
 
     # Call OpenAI Chat API
     if not client:
@@ -369,6 +505,8 @@ async def ask_chatgpt(message: Dict[str, str]) -> Dict[str, str]:
     try:
         print(f"🤖 Processing message: {user_message}")
         print(f"📄 Context found: {len(similar_chunks)} chunks")
+        if web_search_info:
+            print(f"🌐 Web search performed: {len(web_search_info)} characters")
         
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
@@ -376,7 +514,7 @@ async def ask_chatgpt(message: Dict[str, str]) -> Dict[str, str]:
                 {"role": "system", "content": system_prompt},
                 {"role": "user", "content": user_message}
             ],
-            max_tokens=512,
+            max_tokens=1000,
             temperature=0.7,
         )
         answer = response.choices[0].message.content.strip()
@@ -420,6 +558,82 @@ def generate_rag_response(question: str, context: str, filename: str, similar_ch
             f"I couldn't find specific information related to your question in the document '{filename}'. "
             "Could you please rephrase or ask about a different aspect of the document?"
         )
+
+def search_google(query: str, num_results: int = 3) -> list:
+    """Search Google and return relevant information."""
+    try:
+        search_results = []
+        for url in search(query, num_results=num_results, stop=num_results, pause=2.0):
+            try:
+                response = requests.get(url, timeout=5, headers={
+                    'User-Agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36'
+                })
+                if response.status_code == 200:
+                    soup = BeautifulSoup(response.content, 'html.parser')
+                    
+                    # Remove script and style elements
+                    for script in soup(["script", "style"]):
+                        script.decompose()
+                    
+                    # Get text content
+                    text = soup.get_text()
+                    lines = (line.strip() for line in text.splitlines())
+                    chunks = (phrase.strip() for line in lines for phrase in line.split("  "))
+                    text = ' '.join(chunk for chunk in chunks if chunk)
+                    
+                    # Extract relevant information (first 500 characters)
+                    relevant_text = text[:500] + "..." if len(text) > 500 else text
+                    search_results.append({
+                        "url": url,
+                        "content": relevant_text
+                    })
+            except Exception as e:
+                print(f"❌ Error fetching content from {url}: {e}")
+                continue
+                
+        return search_results
+    except Exception as e:
+        print(f"❌ Error in Google search: {e}")
+        return []
+
+def extract_person_info(query: str) -> str:
+    """Extract information about a person using Google search."""
+    try:
+        # Clean the query to extract just the person's name
+        person_name = query.replace("who is", "").replace("tell me about", "").replace("information about", "").replace("profile of", "").replace("background of", "").strip()
+        
+        # Search for the person with multiple queries for better results
+        search_queries = [
+            f"{person_name} profile biography career",
+            f"{person_name} current information 2024",
+            f"{person_name} background achievements"
+        ]
+        
+        all_results = []
+        for search_query in search_queries:
+            search_results = search_google(search_query, num_results=2)
+            all_results.extend(search_results)
+        
+        if not all_results:
+            return f"I couldn't find information about {person_name} through web search."
+        
+        # Remove duplicates and combine results
+        unique_results = []
+        seen_urls = set()
+        for result in all_results:
+            if result['url'] not in seen_urls:
+                unique_results.append(result)
+                seen_urls.add(result['url'])
+        
+        # Combine search results with better formatting
+        combined_info = f"Web search results for '{person_name}':\n\n"
+        for i, result in enumerate(unique_results[:4], 1):  # Limit to 4 best results
+            combined_info += f"Source {i} ({result['url']}):\n{result['content']}\n\n"
+        
+        return combined_info
+    except Exception as e:
+        print(f"❌ Error extracting person info: {e}")
+        return f"Error searching for information about {query}"
 
 def generate_context_response(question: str, document_content: str, filename: str) -> str:
     """Generate a response based on document content and user question."""
@@ -468,8 +682,26 @@ async def get_problem():
 
 @app.on_event("startup")
 async def startup_event():
-    """Initialize Milvus connection on startup."""
-    init_milvus()
+    """Initialize all connections on startup."""
+    print("🚀 Starting AI Document Assistant...")
+    
+    # Initialize OpenAI
+    openai_success = initialize_openai_client()
+    
+    # Initialize Milvus
+    try:
+        init_milvus()
+        milvus_success = True
+    except Exception as e:
+        print(f"❌ Milvus initialization failed: {e}")
+        milvus_success = False
+    
+    # Print startup summary
+    print("\n📊 Startup Summary:")
+    print(f"   OpenAI: {'✅ Connected' if openai_success else '❌ Failed'}")
+    print(f"   Milvus: {'✅ Connected' if milvus_success else '❌ Failed'}")
+    print(f"   API Key: {'✅ Set' if OPENAI_API_KEY else '❌ Missing'}")
+    print("🚀 Application ready!")
 
 if __name__ == "__main__":
     import uvicorn
