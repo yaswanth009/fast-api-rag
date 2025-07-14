@@ -320,9 +320,9 @@ This project is licensed under the MIT License - see the [LICENSE](LICENSE) file
 
 ## 📞 Support
 
-- **Issues**: [GitHub Issues](https://github.com/yourusername/fastapi-vibe-coding/issues)
-- **Discussions**: [GitHub Discussions](https://github.com/yourusername/fastapi-vibe-coding/discussions)
-- **Email**: your-email@example.com
+- **Issues**: [GitHub Issues](https://github.com/yaswanth009/fastapi-vibe-coding/issues)
+- **Discussions**: [GitHub Discussions](https://github.com/yaswanth009/fastapi-vibe-coding/discussions)
+- **Email**: yash.bigdata@hotmail.com
 
 ---
 
