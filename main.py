@@ -18,8 +18,8 @@ from bs4 import BeautifulSoup
 import re
 
 # Milvus Managed (Zilliz Cloud) credentials
-MILVUS_URI = "https://in03-1b399db96562037.serverless.gcp-us-west1.cloud.zilliz.com" # e.g., "https://in01-xxxx.api.gcp-us-west1.zillizcloud.com"
-MILVUS_TOKEN = "9a6e98b0f915fb79e7fd27cf4689962a4c41d6f6145c2dd2adc327f0e9eaee99e3671cace0f7b70cca8a552ac23e2eb111cf7168"
+MILVUS_URI = "***" # e.g., "https://in01-xxxx.api.gcp-us-west1.zillizcloud.com"
+MILVUS_TOKEN = "***"
 
 COLLECTION_NAME = "DataExpertLabTestYaswanth"
 DIMENSION = 3270  # OpenAI Ada embedding dimension
